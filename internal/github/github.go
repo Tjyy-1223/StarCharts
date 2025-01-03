@@ -140,7 +140,7 @@ func (gh *GitHub) checkToken(token *roundrobin.Token) error {
 }
 
 func isAboveTargetUsage(rate rate, target int) bool {
-	return (rate.Remaining * 100 / rate.Limit) > target
+	return (rate.Remaining * 100 / rate.Limit) < target
 }
 
 type rateLimit struct {
