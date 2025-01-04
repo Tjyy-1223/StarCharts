@@ -1891,7 +1891,618 @@ func TestStargazers_APIFailure(t *testing.T) {
 
 
 
+### 6 internal/chart pkg
+
+#### 6.1 svg/helper.go
+
+```go
+package svg
+
+import "fmt"
+
+type Number interface {
+	int | int64 | float32 | float64
+}
+
+func px[T Number](value T) string {
+	return fmt.Sprintf("%vpx", value)
+}
+
+func Point[T Number](value T) string {
+	return fmt.Sprintf("%v", value)
+}
+```
+
+这段代码是Go语言中的泛型定义，涉及到类型约束和格式化输出。我们来逐个分析这段代码的含义。
+
+1. **`Number` 类型接口**
+
+```go
+type Number interface {
+    int | int64 | float32 | float64
+}
+```
+
+这部分代码定义了一个名为 `Number` 的类型接口（Go语言的接口与其他语言的接口有一些不同，Go的接口不需要显式地实现）。这个接口的作用是限制泛型类型的范围。
+
+- `int | int64 | float32 | float64` 是Go语言中类型约束的语法，表示 `Number` 接口可以接受 `int`、`int64`、`float32` 或 `float64` 这四种类型中的任意一种。
+- `Number` 类型接口并没有方法，而是一个“联合类型”约束，告诉编译器任何实现该接口的类型必须是这四种数字类型之一。
+
+2. **`px` 函数**
+
+- `px[T Number](value T) string` 定义了一个泛型函数，函数名称为 `px`，它接受一个类型为 `T` 的参数 `value`，并返回一个 `string` 类型的值。
+- `T` 是一个类型参数，`T` 必须满足 `Number` 类型接口的约束，意味着 `T` 可以是 `int`、`int64`、`float32` 或 `float64`。
+- `fmt.Sprintf("%vpx", value)` 会格式化 `value` 的值（使用默认格式），并将它转化为字符串，最后在值后面加上 `"px"`，返回这个结果。
+
+3. **`Point` 函数**
+
+- `Point[T Number](value T) string` 定义了一个泛型函数，函数名称为 `Point`，接受一个类型为 `T` 的参数 `value`，并返回一个 `string` 类型的值。
+- `T` 仍然是泛型类型参数，必须满足 `Number` 类型接口的约束（即是 `int`、`int64`、`float32` 或 `float64` 之一）。
+- `fmt.Sprintf("%v", value)` 会格式化 `value` 的值并返回一个字符串。这里的 `"%v"` 是默认的格式标识符，它会根据 `value` 的实际类型自动选择适当的格式。
+
+**选择是否使用泛型，主要取决于你需要的灵活性和可复用性。在你给出的两个例子中：**
+
+- 如果你预期函数仅处理一种类型（例如，`Number` 作为接口类型的通用处理），直接使用接口类型 `Number` 可能足够。
+- 如果你希望函数能够处理多种不同的数值类型，并且希望编译时进行类型检查，泛型提供了更好的方式。
+
+所以，**泛型的优势**在于它允许你处理不同类型，而不需要依赖接口的实现，同时它也能在**编译时提高类型检查和性能。**
 
 
 
+#### 6.2 svg/math.go
+
+```go
+package svg
+
+import "math"
+
+const (
+	_2pi = 2 * math.Pi
+	_pi2 = math.Pi / 2
+	_r2d = 180 / math.Pi
+)
+
+func RadianAdd(base, delta float64) float64 {
+	value := base + delta
+	if value > _2pi {
+		return math.Mod(value, _2pi) // 如果超过 2π，将其映射到 0 到 2π 之间
+	}
+
+	if value < 0 {
+		return math.Mod(_2pi+value, _2pi) // 如果小于 0，将其映射到 0 到 2π 之间
+	}
+
+	return value // 如果 value 在 0 到 2π 之间，直接返回
+}
+
+// 先使用 math.Mod(value, _2pi) 确保输入值在 0 到 2π 的范围内，然后将其乘以 _r2d 来完成弧度到度数的转换。
+func RadiansToDegrees(value float64) float64 {
+	return math.Mod(value, _2pi) * _r2d
+}
+```
+
+这段代码定义了一个简单的数学工具包，主要用于与弧度（radians）和角度（degrees）相关的计算。它提供了两种主要功能：
+
+1. **`RadianAdd`**：用于在给定弧度值（`base`）上加上一个增量（`delta`），并确保结果始终在有效的弧度范围内（0 到 2π 之间）。
+2. **`RadiansToDegrees`**：将弧度值转换为度数值（degrees）。
+
+
+
+#### 6.3 svg/tag_builder.go
+
+`TagBuilder` 结构体及其方法提供了一个灵活的方式来构建和渲染 HTML 或 SVG 标签。
+
+你可以通过链式调用 `Attr` 和 `Content` 来设置标签的属性和内容，使用 `Render` 输出标签到 `io.Writer`，或者使用 `String` 获取标签的字符串表示。这种设计使得构建复杂的标签变得更加简洁和高效。
+
+
+
+
+
+#### 6.4 svg/path.go
+
+`PathBuilder` 是为生成 SVG 路径元素设计的。SVG 路径（`<path>` 元素）用于绘制复杂的图形，如多边形、曲线、弧线等。通过 `PathBuilder`，可以方便地构建这些路径，并通过 `Render` 或 `String` 方法将其输出为最终的 SVG 格式。
+
+例如，调用 `PathBuilder` 生成一个简单的矩形路径，或者绘制一个圆弧，类似这样：
+
+```go
+pb := Path()
+pb.MoveTo(10, 10).
+   LineTo(50, 10).
+   LineTo(50, 50).
+   LineTo(10, 50).
+   LineTo(10, 10)
+pb.Render(os.Stdout)
+```
+
+这个例子会输出一个包含四条直线的矩形路径。
+
+1. **`M`**：`MoveTo` 命令，用于将画笔移动到指定位置（起点）。
+2. **`L`**：`LineTo` 命令，用于绘制一条直线到指定位置。
+3. **`A`**：`ArcTo` 命令，用于绘制椭圆弧。
+4. **`d`**：在 `<path>` 元素中，`d` 属性定义了路径的数据。
+
+总结来说，`PathBuilder` 是一个封装工具，帮助用户构建 SVG 路径的字符串表示，它抽象了常见的路径命令（如直线、移动和弧线等），使得程序员可以更方便地生成 SVG 路径。
+
+
+
+#### 6.5 box.go
+
+该代码主要实现了与矩形框和矩形四个角相关的操作，包括计算宽度、高度、中心、克隆矩形框、旋转矩形框等功能。
+
+还定义了 `BoxCorners` 类型，用于表示矩形的四个角，并提供了从四个角计算矩形框、计算中心点、旋转矩形四个角等方法。
+
+这些方法常用于图形界面、图形计算或布局计算中，可能用于某些可视化、绘图、坐标变换等应用场景。
+
+
+
+#### 6.6 range.go
+
+这段 Go 代码定义了一个名为 `Range` 的结构体及其相关方法，用于将一个浮动的数值（`value`）根据一个给定的范围 (`Min` 和 `Max`) 映射到一个整数区间（`Domain`）。具体来说，它的作用是将输入的浮动数值归一化后转换为整数值，通常用于图表、图形或数据可视化中。
+
+假设有以下的 `Range` 对象和输入值：
+
+```go
+r := Range{Min: 10, Max: 20, Domain: 100}
+value := 15
+result := r.Translate(value)
+```
+
+- `r.GetDelta()` 将返回 `Max - Min = 20 - 10 = 10`。
+- `normalized := value - r.Min = 15 - 10 = 5`，表示 `value` 与 `Min` 之间的偏移量。
+- `ratio := normalized / r.GetDelta() = 5 / 10 = 0.5`，表示 `value` 在整个区间 `[10, 20]` 中的比例。
+- `ratio * float64(r.Domain) = 0.5 * 100 = 50`，表示将比例映射到目标区间 `[0, 100]`。
+- `math.Ceil(50)` 结果是 50，最终 `Translate` 方法返回 50。
+
+
+
+#### 6.7 css.go
+
+这段代码定义了三个常量字符串：`LightStyles`、`DarkStyles` 和 `AdaptiveStyles`，它们分别包含了 SVG 图形的样式定义。SVG（Scalable Vector Graphics）是一种基于 XML 的矢量图形格式，可以用来描述二维图形。样式表用于控制 SVG 元素（如 `path`、`rect` 和 `text`）的外观。
+
+1. `LightStyles`（浅色模式样式）
+
+```go
+const LightStyles = `
+path {fill: none; stroke : rgb(51,51,51);}
+path.series { stroke: #6b63ff; }
+rect.background { fill: rgb(255,255,255); stroke: none; }
+
+text {
+	stroke-width: 0;
+	stroke: none;
+	fill: rgba(51,51,51,1.0);
+	font-size: 12.8px;
+	font-family: 'Roboto Medium', sans-serif;
+}
+`
+```
+
+- **`path { fill: none; stroke: rgb(51,51,51); }`**：所有 `path` 元素的填充颜色为 `none`（透明），边框颜色为灰色（`rgb(51,51,51)`）。
+- **`path.series { stroke: #6b63ff; }`**：类名为 `series` 的 `path` 元素的边框颜色为紫色（`#6b63ff`）。
+- **`rect.background { fill: rgb(255,255,255); stroke: none; }`**：类名为 `background` 的 `rect` 元素（通常用于矩形背景）填充为白色，边框为 `none`（无边框）。
+- **`text { stroke-width: 0; stroke: none; fill: rgba(51,51,51,1.0); font-size: 12.8px; font-family: 'Roboto Medium', sans-serif; }`**：
+  - 所有 `text` 元素的文本没有边框（`stroke-width: 0` 和 `stroke: none`）。
+  - 文本填充颜色为深灰色（`rgba(51,51,51,1.0)`）。
+  - 字体大小为 12.8 像素，字体为 `'Roboto Medium'`（如果找不到该字体，则使用默认的 sans-serif 字体）。
+
+2. `DarkStyles`（深色模式样式）
+
+```go
+const DarkStyles = `
+path { fill: none; stroke: rgb(51,51,51); }
+path.series { stroke: #6b63ff; }
+rect.background { fill: rgb(255,255,255); stroke: none; }
+
+text {
+	stroke-width: 0;
+	stroke: none;
+	fill: rgba(51,51,51,1.0);
+	font-size: 12.8px;
+	font-family: 'Roboto Medium', sans-serif;
+}
+
+path { stroke: rgb(230, 237, 243); }
+path.series { stroke: #6b63ff; }
+text { fill: rgb(230, 237, 243); }
+rect.background { fill: rgb(0,0,0); }
+`
+```
+
+- **`path { fill: none; stroke: rgb(51,51,51); }`** 和 **`path.series { stroke: #6b63ff; }`**：这两行与 `LightStyles` 中的定义相同，意味着大部分 `path` 元素的边框为灰色，类名为 `series` 的 `path` 元素的边框为紫色。
+- **`rect.background { fill: rgb(255,255,255); stroke: none; }`**：与浅色模式中的背景矩形样式相同，矩形背景填充为白色，且无边框。
+- **`text { stroke-width: 0; stroke: none; fill: rgba(51,51,51,1.0); font-size: 12.8px; font-family: 'Roboto Medium', sans-serif; }`**：这与 `LightStyles` 中的文本样式相同。
+- **`path { stroke: rgb(230, 237, 243); }`**：所有 `path` 元素的边框颜色变为浅灰色（`rgb(230, 237, 243)`），这使得在深色背景下，`path` 更加突出。
+- **`text { fill: rgb(230, 237, 243); }`**：所有文本的填充颜色变为浅灰色，确保在深色背景下文本可读性较高。
+- **`rect.background { fill: rgb(0,0,0); }`**：背景矩形的填充颜色改为黑色，符合深色模式的主题。
+
+3. `AdaptiveStyles`（自适应样式）
+
+```go
+const AdaptiveStyles = `
+path { fill: none; stroke: rgb(51,51,51); }
+path.series { stroke: #6b63ff; }
+rect.background { fill: none; stroke: none; }
+
+text {
+	stroke-width: 0;
+	stroke: none;
+	fill: rgba(51,51,51,1.0);
+	font-size: 12.8px;
+	font-family: 'Roboto Medium', sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+	path { stroke: rgb(230, 237, 243); }
+	path.series { stroke: #6b63ff; }
+	text { fill: rgb(230, 237, 243); }
+}
+`
+```
+
+- **`path { fill: none; stroke: rgb(51,51,51); }`** 和 **`path.series { stroke: #6b63ff; }`**：这些与前面的样式相同，表示在默认情况下，`path` 元素使用灰色边框，`series` 类的 `path` 使用紫色边框。
+- **`rect.background { fill: none; stroke: none; }`**：背景矩形设置为透明，不填充颜色，且无边框。
+- **`text { stroke-width: 0; stroke: none; fill: rgba(51,51,51,1.0); font-size: 12.8px; font-family: 'Roboto Medium', sans-serif; }`**：文本样式与前述相同。
+- **`@media (prefers-color-scheme: dark)`**：这个 CSS 媒体查询表示，在用户的操作系统或浏览器设置为深色模式时，以下样式将被应用：
+  - `path` 元素的边框颜色变为浅灰色（`rgb(230, 237, 243)`）。
+  - `text` 元素的填充颜色变为浅灰色。
+  - `path.series` 的边框颜色仍然是紫色（`#6b63ff`）。
+
+总结：
+
+- **`LightStyles`**：定义了适用于浅色模式的样式。
+- **`DarkStyles`**：定义了适用于深色模式的样式。
+- **`AdaptiveStyles`**：定义了适应用户系统主题的样式。它使用了 `@media (prefers-color-scheme: dark)` 媒体查询，使得当用户启用深色模式时，样式会自动切换为深色模式的配色。
+
+这些样式主要用于在 SVG 图形中根据不同的显示模式（浅色模式或深色模式）调整图形元素的颜色，以提供更好的可读性和视觉效果。
+
+
+
+#### 6.8 font.go
+
+这段 Go 代码的作用是加载并提供一个 `Roboto Medium` 字体的 `truetype.Font` 对象，这样在后续的图形或文本渲染中，可以使用这个字体进行绘制。它通过 `sync.Mutex` 来确保对字体的加载过程进行线程安全的保护，避免并发情况下的竞态条件。
+
+
+
+#### 6.9 helpers.go
+
+这段代码主要用于构建与图表、SVG 图形相关的工具函数，功能包括：
+
+1. 测量文本的宽度和高度。
+2. 格式化时间和整数值。
+3. 生成旋转变换字符串。
+4. 标准化描边宽度，确保不会小于最小值。
+5. 生成样式字符串，用于设置 SVG 元素的 CSS 样式。
+
+这些函数通常在图表绘制、SVG 元素渲染、数据可视化等场景中使用。例如，在生成动态图表或图形时，可能需要根据用户输入、数据或其它条件格式化文本、调整图形元素的尺寸和位置、应用样式等操作。
+
+
+
+#### 6.10 math.go
+
+该代码库提供了一些常见的数学运算和数值处理工具，涉及：
+
+- **数值舍入与精度控制**：`roundUp`、`roundDown`、`getRoundToForDelta`。
+- **数学计算**：如计算平均值、和、绝对值等。
+- **几何变换**：如坐标旋转 (`rotateCoordinate`)。
+- **时间与单位转换**：时间转换为浮点数 (`toFloat64`)，以及字体点转换为像素 (`pointsToPixels`)。
+
+这些功能可以在很多不同的应用场景中用到，例如图表绘制、数据分析、图形计算等。
+
+
+
+#### 6.11 tick.go
+
+```go
+type Tick struct {
+	Value float64
+	Label string
+}
+
+type Ticks []Tick
+
+func (t Ticks) String() string {
+	var values []string
+	for i, tick := range t {
+		values = append(values, fmt.Sprintf("[%d: %s]", i, tick.Label))
+	}
+	return strings.Join(values, ", ")
+}
+
+func generateTicks(rng *Range, isVertical bool, formatter ValueFormatter) []Tick {
+	ticks := Ticks{
+		{Value: rng.Min, Label: formatter(rng.Min)},
+	}
+
+	labelBox := measureText(formatter(rng.Min), AxisFontSize)
+
+	var tickSize float64
+	if isVertical {
+		tickSize = float64(labelBox.Height() + MinimumTickVerticalSpacing)
+	} else {
+		tickSize = float64(labelBox.Width() + MinimumTickHorizontalSpacing)
+	}
+
+	domainRemainder := float64(rng.Domain) - (tickSize * 2)
+	intermediateTickCount := int(math.Floor(domainRemainder / tickSize))
+
+	rangeDelta := abs(rng.Max - rng.Min)
+	tickStep := rangeDelta / float64(intermediateTickCount)
+
+	roundTo := getRoundToForDelta(rangeDelta) / 10
+	intermediateTickCount = min(intermediateTickCount, DefaultTickCountSanityCheck)
+
+	for x := 1; x < intermediateTickCount; x++ {
+		tickValue := rng.Min + roundUp(tickStep*float64(x), roundTo)
+		ticks = append(ticks, Tick{
+			Value: tickValue,
+			Label: formatter(tickValue),
+		})
+	}
+
+	return append(ticks, Tick{
+		Value: rng.Max,
+		Label: formatter(rng.Max),
+	})
+}
+```
+
+**`generateTicks` 函数**： 该函数的作用是根据传入的范围和其他参数，生成一个刻度线（`Ticks`）的切片。
+
+- **参数**：
+  - `rng`: 一个表示范围的结构体，包含最小值（`Min`）和最大值（`Max`），以及计算范围的总长度（`Domain`）。
+  - `isVertical`: 一个布尔值，指示坐标轴是垂直方向（`true`）还是水平方向（`false`）。
+  - `formatter`: 一个格式化函数，用于将数值转换为标签（字符串）。
+- **步骤**：
+  1. **初始化刻度**：首先将最小值（`rng.Min`）作为第一个刻度值，并通过 `formatter` 格式化成标签，添加到 `ticks` 切片中。
+  2. **计算标签尺寸**：使用 `measureText` 函数计算最小值标签的尺寸，确定刻度之间的间距。这里使用 `AxisFontSize`（字体大小）来估算标签的宽度或高度。
+  3. **计算刻度间距**：根据可用空间和刻度标签的尺寸，计算出可容纳的刻度数量，并计算出每个刻度的步长（`tickStep`）。
+  4. **生成中间的刻度**：使用计算出的步长逐步生成刻度值，并使用 `formatter` 格式化生成相应的标签。每个生成的刻度都被添加到 `ticks` 切片中。
+  5. **最后添加最大值刻度**：最后，将最大值（`rng.Max`）作为最后一个刻度添加到 `ticks` 中。
+
+函数返回一个包含若干个刻度的切片 `ticks`，每个刻度包含 `Value`（值）和 `Label`（格式化后的标签）。
+
+`generateTicks` 会根据范围的大小、坐标轴方向、标签尺寸以及可用空间等因素来动态调整刻度的数量和步长。
+
+**关键逻辑：**
+
+- **刻度数量的计算**：通过减去两端的空间（即两端刻度的间隔），然后计算出剩余空间能容纳多少个刻度。
+- **步长和刻度值的生成**：通过根据步长递增，逐个生成中间的刻度值，并保证数值的精确度（通过 `roundUp` 函数确保刻度值精确到一定的位数）。
+- **坐标轴方向的考虑**：根据坐标轴是垂直方向还是水平方向，计算不同的刻度间距（水平和垂直的标签尺寸是不同的）。
+
+
+
+#### 6.12 series.go
+
+这段代码定义了一个 `Series` 结构体及其方法，主要用于表示并渲染一个数据系列，通常用于图表绘制。具体来说，它包含 X 和 Y 轴上的一系列数据点，并能够根据这些数据生成 SVG 格式的路径，用于图表的绘制。
+
+1. **`Series` 结构体定义**
+
+```go
+type Series struct {
+    XValues     []time.Time  // X 轴数据点（时间戳）
+    YValues     []float64    // Y 轴数据点（浮动的数值）
+    StrokeWidth float64      // 线条的宽度
+    Color       string       // 线条的颜色
+}
+```
+
+`Series` 结构体代表一条数据线（例如图表中的折线）。它包含以下字段：
+
+- `XValues`: 一个时间类型的切片，表示数据点的 X 坐标，通常是时间数据。
+- `YValues`: 一个浮动数值的切片，表示数据点的 Y 坐标，通常是某个度量的值（如温度、股票价格等）。
+- `StrokeWidth`: 表示线条的宽度，用于调整线条的粗细。
+- `Color`: 线条的颜色，用于设置图表中的数据系列颜色。
+
+2. **`Render(w io.Writer, canvasBox *Box, xrange, yrange *Range)` 方法**
+
+```go
+func (ts *Series) Render(w io.Writer, canvasBox *Box, xrange, yrange *Range) {
+    if len(ts.XValues) == 0 {
+        return
+    }
+
+    cb := canvasBox.Bottom  // 画布底部坐标
+    cl := canvasBox.Left    // 画布左边坐标
+
+    v0x, v0y := ts.GetValues(0)  // 获取第一个数据点
+    x0 := cl + xrange.Translate(v0x)  // 计算第一个点的 X 坐标
+    y0 := cb - yrange.Translate(v0y)  // 计算第一个点的 Y 坐标
+
+    var vx, vy float64
+    var x, y int
+
+    path := svg.Path().
+        Attr("stroke-width", normaliseStrokeWidth(ts.StrokeWidth)).  // 设置线条宽度
+        Attr("style", styles("stroke", ts.Color)).                   // 设置线条颜色
+        Attr("class", "series").                                     // 设置类名
+        MoveTo(x0, y0)                                              // 移动到第一个点
+
+    // 绘制剩余的数据点
+    for i := 1; i < ts.Len(); i++ {
+        vx, vy = ts.GetValues(i)  // 获取当前数据点
+        x = cl + xrange.Translate(vx)  // 计算 X 坐标
+        y = cb - yrange.Translate(vy)  // 计算 Y 坐标
+        path.LineTo(x, y)  // 添加到路径中
+    }
+
+    path.Render(w)  // 渲染路径到 io.Writer（通常是生成 SVG）
+}
+```
+
+`Render()` 方法用于将数据系列渲染成图形。在这个方法中：
+
+- 它首先检查是否有数据点（即 `XValues` 是否为空）。
+- `canvasBox` 是一个矩形区域，表示图表的绘制区域，`xrange` 和 `yrange` 用来进行坐标转换，将数据系列的 X 和 Y 坐标映射到实际的画布坐标系上。
+- `MoveTo(x0, y0)` 设置起点（第一个数据点），然后通过 `LineTo(x, y)` 按照顺序连接数据点，形成路径。
+- 最后，调用 `path.Render(w)` 将生成的路径渲染到 `io.Writer`，通常是一个 SVG 文件。
+
+这段代码的主要目的是绘制折线图等基于时间序列的数据图表。`Series` 结构体保存了数据点（X 和 Y 值），并提供了一个 `Render()` 方法将数据点渲染为 SVG 路径。
+
+通过该方法，可以把时间序列数据转换成图表的可视化表现。
+
+
+
+#### 6.13 x_pixels.go/y_pixels.go
+
+这段代码定义了一个 `XAxis` 结构体及其方法，主要用于绘制图表中的 **X 轴**。该结构体包含了 X 轴的名称、线条宽度、颜色等属性，并通过方法来计算 X 轴的布局和渲染过程。具体来说，它为图表中的 X 轴生成了刻度、标签，并渲染出一个 SVG 格式的 X 轴。
+
+**1. `XAxis` 结构体定义**
+
+```go
+type XAxis struct {
+    Name        string  // X 轴名称
+    StrokeWidth float64 // 线条宽度
+    Color       string  // 线条和文本的颜色
+}
+```
+
+- `Name`: 代表 X 轴的名称，通常会显示在 X 轴的底部，作为描述。
+- `StrokeWidth`: X 轴线条的宽度。
+- `Color`: X 轴的颜色，既影响线条的颜色，也影响标签的颜色。
+
+**2. `Measure` 方法**
+
+```go
+func (xa *XAxis) Measure(canvas *Box, ra *Range, ticks []Tick) *Box {
+    var ltx, rtx int
+    var tx, ty int
+
+    left, right, bottom := math.MinInt32, 0, 0
+    for _, t := range ticks {
+        v := t.Value
+        tb := measureText(t.Label, AxisFontSize)
+
+        tx = canvas.Left + ra.Translate(v)
+        ty = canvas.Bottom + XAxisMargin + tb.Height()
+        ltx = tx - tb.Width()>>1
+        rtx = tx + tb.Width()>>1
+
+        left = min(left, ltx)
+        right = max(right, rtx)
+        bottom = max(bottom, ty)
+    }
+
+    tb := measureText(xa.Name, AxisFontSize)
+    bottom += XAxisMargin + tb.Height()
+
+    return &Box{
+        Top:    canvas.Bottom,
+        Left:   left,
+        Right:  right,
+        Bottom: bottom,
+    }
+}
+```
+
+`Measure` 方法的作用是 **计算并返回 X 轴的位置和大小**，具体步骤如下：
+
+- `canvas`: 图表绘制区域的框，包含了图表的上下左右坐标。
+- `ra`: X 轴的数据范围对象，用于将数据值转换为图表的坐标。
+- `ticks`: 存储了刻度值和刻度标签的切片。每个刻度都有一个数值和标签。
+
+**步骤解析：**
+
+- 方法首先初始化了几个变量，`left`、`right` 和 `bottom` 用于计算 X 轴的边界。
+- 对于每个刻度，它通过 `measureText` 获取标签的大小，并计算该刻度的水平位置（`tx`）和垂直位置（`ty`）。
+- `left` 和 `right` 分别表示 X 轴的最左边和最右边的水平位置，`bottom` 表示 X 轴的底部位置。
+- 最后，它返回一个 `Box` 结构体，表示 X 轴的布局区域，`Box` 是一个矩形区域，包含 `Top`、`Left`、`Right`、`Bottom` 坐标。
+
+**3. `Render` 方法**
+
+```go
+func (xa *XAxis) Render(w io.Writer, canvasBox *Box, ra *Range, ticks []Tick) {
+    strokeWidth := normaliseStrokeWidth(xa.StrokeWidth)
+    strokeStyle := styles("stroke", xa.Color)
+    fillStyle := styles("fill", xa.Color)
+
+    svg.Path().
+        Attr("stroke-width", strokeWidth).
+        Attr("style", strokeStyle).
+        MoveToF(float64(canvasBox.Left)-xa.StrokeWidth/2, float64(canvasBox.Bottom)).
+        LineTo(canvasBox.Right, canvasBox.Bottom).
+        Render(w)
+```
+
+`Render` 方法用于渲染 X 轴到指定的输出流（通常是 `io.Writer`，例如生成 SVG 文件）。它的主要任务是将 X 轴线和刻度标签绘制到图表中。具体步骤如下：
+
+- 首先，通过 `normaliseStrokeWidth` 方法和 `styles` 方法设置线条的宽度和颜色。
+- `svg.Path()` 用于绘制 X 轴的主线，起始点位于 `canvasBox.Left` 和 `canvasBox.Bottom`，终点位于 `canvasBox.Right` 和 `canvasBox.Bottom`，形成一条横向的线条。
+
+接下来是渲染每个刻度和标签的部分：
+
+```go
+var tx, ty int
+	var maxTextHeight int
+	for _, t := range ticks {
+		v := t.Value
+		lx := ra.Translate(v)
+
+		tx = canvasBox.Left + lx
+
+		svg.Path().
+			Attr("stroke-width", strokeWidth).
+			Attr("style", strokeStyle).
+			MoveTo(tx, canvasBox.Bottom).
+			LineTo(tx, canvasBox.Bottom+VerticalTickHeight).
+			Render(w)
+
+		tb := measureText(t.Label, AxisFontSize)
+
+		tx = tx - tb.Width()>>1
+		ty = canvasBox.Bottom + XAxisMargin + tb.Height()
+
+		svg.Text().
+			Content(t.Label).
+			Attr("style", fillStyle).
+			Attr("x", svg.Point(tx)).
+			Attr("y", svg.Point(ty)).
+			Render(w)
+
+		maxTextHeight = max(maxTextHeight, tb.Height())
+}
+```
+
+- 对于每个刻度 t：
+  - 通过 `ra.Translate(v)` 将刻度的数值 `v` 转换为图表的 X 坐标。
+  - `svg.Path()` 绘制垂直的刻度线。
+  - `measureText` 用于获取刻度标签的尺寸，然后将其渲染到图表中，标签的位置是基于刻度线的位置计算的。
+  - `maxTextHeight` 用来记录所有标签的最大高度，以便在绘制 X 轴名称时调整位置。
+
+最后，渲染 X 轴的名称：
+
+```go
+tb := measureText(xa.Name, AxisFontSize)
+tx = canvasBox.Right - (canvasBox.Width()>>1 + tb.Width()>>1)
+ty = canvasBox.Bottom + XAxisMargin + maxTextHeight + XAxisMargin + tb.Height()
+
+svg.Text().
+  Content(xa.Name).
+  Attr("style", fillStyle).
+  Attr("x", svg.Point(tx)).
+  Attr("y", svg.Point(ty)).
+  Render(w)
+```
+
+- 渲染 X 轴名称 (`xa.Name`)，根据图表的宽度和标签的宽度居中对齐，并放置在 X 轴的下方。
+
+
+
+#### 6.14 render.go
+
+这段代码是一个用于渲染图表的 Go 语言代码。它的作用是生成一个 SVG 格式的图表，并将其写入到指定的 `io.Writer`，比如一个文件或 HTTP 响应中。整体结构和设计是为了生成一个包含背景、轴线、刻度、数据系列的 SVG 图表。**最终生成的图表可以用于网页显示或打印。**
+
+**其中主要方法为`Render(w io.Writer)` 方法：**
+
+这个方法是 `Chart` 类型的核心方法，用于生成并渲染图表的内容。它的流程如下：
+
+- **获取绘图区域 (`canvas`)**：`canvas := c.Box()` 调用 `Box()` 方法返回一个表示图表绘制区域的矩形框。
+- **获取 x 和 y 轴的范围**：`xRange, yRange := c.getRanges(canvas)` 计算图表的 x 轴和 y 轴的数据范围。这些范围将用于定义刻度和坐标轴的位置。
+- **生成坐标轴刻度**：`xTicks := generateTicks(xRange, false, timeValueFormatter)` 和 `yTicks := generateTicks(yRange, true, intValueFormatter)` 生成 x 轴和 y 轴的刻度值。
+- **计算外部边界**：`axesOuterBox := canvas.Clone().Grow(c.XAxis.Measure(canvas, xRange, xTicks)).Grow(c.YAxis.Measure(canvas, yRange, yTicks))` 计算出包含坐标轴的完整绘图区域边界，考虑到坐标轴的宽度。
+- **裁剪图表区域**：`plot := canvas.OuterConstrain(c.Box(), axesOuterBox)` 确定数据图表实际绘制的区域，避免超出坐标轴的区域。
+- **调整 x 和 y 范围的域 (Domain)**：`xRange.Domain = plot.Width()` 和 `yRange.Domain = plot.Height()` 根据绘图区域的宽高调整坐标轴的比例范围。
+- **生成背景矩形**：`background := svg.Rect()` 创建一个背景矩形元素，填充背景色，并添加圆角。
+- **样式设置**：`cssStyles := c.Styles` 如果图表没有提供自定义样式，则使用默认的 `LightStyles` 样式。
+- **生成 SVG 元素**：`svgElement := svg.SVG()` 创建一个包含图表所有元素的 SVG 根元素，并通过 `ContentFunc` 将样式、背景、数据系列、坐标轴渲染到最终的 SVG 中。
+- **渲染 SVG**：`svgElement.Render(w)` 将生成的 SVG 内容渲染到指定的 `io.Writer`。
 
